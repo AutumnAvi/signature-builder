@@ -9,6 +9,7 @@ export interface SignatureData {
   office: string;
   email: string;
   website: string;
+  additionalInfo: string;
   disclaimer: string;
   images: { id: string | number; description: string; position: string; bbox?: { x: number; y: number; w: number; h: number } }[];
 }
@@ -19,13 +20,19 @@ interface Props {
   onBack: () => void;
 }
 
-const FIELDS: { key: keyof Omit<SignatureData, "images">; label: string; multiline?: boolean }[] = [
+const FIELDS: { key: keyof Omit<SignatureData, "images">; label: string; multiline?: boolean; placeholder?: string }[] = [
   { key: "name", label: "Full Name" },
   { key: "title", label: "Job Title" },
   { key: "cell", label: "Cell Phone" },
   { key: "office", label: "Office Phone" },
   { key: "email", label: "Email Address" },
   { key: "website", label: "Website" },
+  {
+    key: "additionalInfo",
+    label: "Additional Info (optional)",
+    multiline: true,
+    placeholder: "Any other lines from your signature — department, address, certifications, fax number, etc. Enter each on a new line.",
+  },
   { key: "disclaimer", label: "Legal Disclaimer", multiline: true },
 ];
 
@@ -49,7 +56,7 @@ export default function Step2ConfirmInfo({ data, onNext, onBack }: Props) {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4 mb-6">
-        {FIELDS.map(({ key, label, multiline }) => (
+        {FIELDS.map(({ key, label, multiline, placeholder }) => (
           <div key={key}>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               {label}
@@ -58,6 +65,7 @@ export default function Step2ConfirmInfo({ data, onNext, onBack }: Props) {
               <textarea
                 value={form[key] as string}
                 onChange={(e) => handleChange(key, e.target.value)}
+                placeholder={placeholder}
                 rows={3}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#8B1A1A] focus:border-transparent resize-y"
               />

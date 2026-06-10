@@ -47,6 +47,7 @@ export default function Home() {
         office: data.office || "",
         email: data.email || "",
         website: data.website || "",
+        additionalInfo: data.additionalInfo || "",
         disclaimer: data.disclaimer || "",
         images: Array.isArray(data.images) ? data.images : [],
       };
