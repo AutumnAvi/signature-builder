@@ -15,6 +15,62 @@ interface Props {
   onBack: () => void;
 }
 
+const UPLOAD_SIZE_LIMIT = 3.5 * 1024 * 1024; // 3.5 MB — safe margin below Vercel's 4.5 MB platform limit
+const MAX_DIMENSION = 1200; // max px on either side before scaling down
+
+async function compressImage(file: File): Promise<File> {
+  // SVGs are vector text — canvas can't process them and they're tiny anyway
+  if (file.type === "image/svg+xml") return file;
+  // Already small enough
+  if (file.size <= UPLOAD_SIZE_LIMIT) return file;
+
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      let w = img.naturalWidth;
+      let h = img.naturalHeight;
+      if (w > MAX_DIMENSION || h > MAX_DIMENSION) {
+        const scale = Math.min(MAX_DIMENSION / w, MAX_DIMENSION / h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(file); return; }
+      ctx.drawImage(img, 0, 0, w, h);
+
+      let quality = 0.85;
+      const attempt = () => {
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) { resolve(file); return; }
+            if (blob.size <= UPLOAD_SIZE_LIMIT || quality <= 0.3) {
+              const outName = file.name.replace(/\.[^.]+$/, ".jpg");
+              resolve(new File([blob], outName, { type: "image/jpeg" }));
+            } else {
+              quality = Math.round((quality - 0.1) * 10) / 10;
+              attempt();
+            }
+          },
+          "image/jpeg",
+          quality
+        );
+      };
+      attempt();
+    };
+
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
+    img.src = objectUrl;
+  });
+}
+
 function ImageCard({
   img,
   index,
@@ -27,7 +83,12 @@ function ImageCard({
   onUploaded: (url: string) => void;
 }) {
   const [cropDataUrl, setCropDataUrl] = useState<string | null>(null);
+  const [compressing, setCompressing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<ImageResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!img.bbox || !screenshotPreview) return;
@@ -50,35 +111,47 @@ function ImageCard({
     };
     htmlImg.src = screenshotPreview;
   }, [img.bbox, screenshotPreview]);
-  const [result, setResult] = useState<ImageResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [localPreview, setLocalPreview] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback(
     async (file: File) => {
       setError(null);
-      // Show local preview immediately
       const reader = new FileReader();
       reader.onload = (e) => setLocalPreview(e.target?.result as string);
       reader.readAsDataURL(file);
 
-      setUploading(true);
       try {
+        // Compress if needed before sending
+        setCompressing(true);
+        const ready = await compressImage(file);
+        setCompressing(false);
+
+        setUploading(true);
         const formData = new FormData();
-        formData.append("image", file);
+        formData.append("image", ready);
+
         const res = await fetch("/api/upload-image", {
           method: "POST",
           body: formData,
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Upload failed");
-        setResult(data);
-        onUploaded(data.rawUrl);
+
+        const rawText = await res.text();
+        console.log(`upload-image ${res.status}:`, rawText.slice(0, 500));
+
+        let parsed: { error?: string; rawUrl?: string; filename?: string };
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          throw new Error(`Server returned non-JSON (${res.status}): ${rawText.slice(0, 200)}`);
+        }
+
+        if (!res.ok) throw new Error(parsed.error || `Upload failed (${res.status})`);
+        setResult(parsed as ImageResult);
+        onUploaded((parsed as ImageResult).rawUrl);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Upload failed");
         setLocalPreview(null);
       } finally {
+        setCompressing(false);
         setUploading(false);
       }
     },
@@ -93,6 +166,8 @@ function ImageCard({
     },
     [handleFile]
   );
+
+  const busy = compressing || uploading;
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -151,19 +226,21 @@ function ImageCard({
             </div>
           ) : (
             <div
-              onClick={() => !uploading && inputRef.current?.click()}
+              onClick={() => !busy && inputRef.current?.click()}
               onDrop={onDrop}
               onDragOver={(e) => e.preventDefault()}
               className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors
-                ${uploading ? "border-gray-200 bg-gray-50 cursor-not-allowed" : "border-gray-300 hover:border-[#8B1A1A] hover:bg-red-50"}`}
+                ${busy ? "border-gray-200 bg-gray-50 cursor-not-allowed" : "border-gray-300 hover:border-[#8B1A1A] hover:bg-red-50"}`}
             >
-              {uploading ? (
+              {busy ? (
                 <div className="flex items-center justify-center gap-2">
                   <svg className="animate-spin w-4 h-4 text-[#8B1A1A]" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                   </svg>
-                  <span className="text-sm text-gray-500">Uploading to GitHub...</span>
+                  <span className="text-sm text-gray-500">
+                    {compressing ? "Compressing image..." : "Uploading to GitHub..."}
+                  </span>
                 </div>
               ) : (
                 <p className="text-sm text-gray-500">
