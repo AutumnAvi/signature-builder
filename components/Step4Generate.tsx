@@ -128,7 +128,7 @@ export default function Step4Generate({ data, imageUrls, screenshotPreview, onBa
         <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
           <span className="text-sm font-medium text-gray-500">Preview</span>
         </div>
-        <div className="p-6 overflow-x-auto">
+        <div className="p-6">
           {generating ? (
             <div className="flex items-center justify-center gap-3 py-8 text-sm text-gray-500">
               <svg className="animate-spin w-5 h-5 text-[#8B1A1A] shrink-0" viewBox="0 0 24 24" fill="none">
@@ -140,9 +140,17 @@ export default function Step4Generate({ data, imageUrls, screenshotPreview, onBa
           ) : html ? (
             <iframe
               srcDoc={html}
-              className="w-full min-h-40 border-0"
+              className="w-full border-0"
+              style={{ minHeight: "200px", height: "200px" }}
               title="Signature Preview"
               sandbox="allow-same-origin"
+              onLoad={(e) => {
+                const frame = e.currentTarget;
+                const doc = frame.contentDocument;
+                if (doc) {
+                  frame.style.height = Math.max(200, doc.documentElement.scrollHeight) + "px";
+                }
+              }}
             />
           ) : null}
         </div>
